@@ -1,0 +1,8 @@
+DEF_PARAM(pref_next_n_on,           PREF_NEXT_N_ON,             Flag,   Flag,   FALSE,)
+DEF_PARAM(debug_pref_next_n,        DEBUG_PREF_NEXT_N,          Flag,   Flag,   FALSE,)
+
+// number of prefetches emitted at a time
+// paper uses 1
+DEF_PARAM(pref_next_n_degree,       PREF_NEXT_N_DEGREE,         uns,    uns,    1,)
+// delta size, 1 is next line prefetcher
+DEF_PARAM(pref_next_n_n,            PREF_NEXT_N_N,              uns,    uns,    1, )
