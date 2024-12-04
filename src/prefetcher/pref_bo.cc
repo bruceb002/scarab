@@ -35,11 +35,21 @@ extern "C" {
 #endif
 
 #include <set>
+#include "libs/bloom_filter.hpp"
 
 /**************************************************************************************/
 /* Macros */
 #define DEBUG(proc_id, args...) _DEBUG(proc_id, DEBUG_BO, ##args)
 
+/* bloom filter stuff */
+// need an array of bloom filters, one for each offset
+// for 'inference' use the bloom filter with the highest score
+// below way too much HW complexity
+// OR index the offsets by the bloom filter
+// check which index it matches, then use that offset
+typedef struct BO_Bloom_Filter_struct {
+  bloom_filter* bloom;
+} BO_Bloom_Filter;
 bestoffset_prefetchers bestoffset_prefetcher_array;
 
 int potentialBOs[] = {1, 2, 3, 4, 5, 6, 8, 9, 10, 12, 15, 16, 18, 20, 24, 25, 27, 30, 32, 36, 40, 45, 48, 50, 54, 60, 64, 72, 75, 80, 81, 90, 96, 100, 108, 120, 125, 128, 135, 144, 150, 160, 162, 180, 192, 200, 216, 225, 240, 243, 250, 256};
@@ -86,7 +96,15 @@ void init_bo_core(HWP* hwp, Pref_BO* bo_hwp_core) {
     bo_hwp_core[proc_id].offset_idx = 0;
     // If we don't start with prefetches
     bo_hwp_core[proc_id].throttle = FALSE;
-
+    bloom_parameters bloom_params;
+    // bloom filter stuff
+    bloom_params.projected_element_count = PREF_BO_BLOOM_ENTRIES;
+    bloom_params.false_positive_probability = PREF_BO_FALSE_POSITIVE_PROB;
+    bloom_parameters.compute_optimal_parameters();
+    bo_hwp_core[proc_id].bloom_filters = (BO_Bloom_Filter*)calloc(PREF_BO_OFFSET_N, sizeof(BO_Bloom_Filters));
+    for (int ii=0; ii<(int)PREF_BO_OFFSET_N;i++) {
+      bo_hwp_core[proc_id].bloom_filters[ii]->bloom = new bloom_filter(bloom_params);
+    }
   }
 }
 
@@ -141,6 +159,7 @@ void pref_bo_train(Pref_BO* bestoffset_hwp, Addr line_addr, uns8 proc_id) {
     bestoffset_hwp->new_phase = FALSE;
     bestoffset_hwp->offset_idx = 0;
     bestoffset_hwp->round = 0;
+    bestoffset_hwp->cur_bloom = bestoffset_hwp->bloom_array[offset_idx];
     // reset score table
     pref_bo_reset_scores(bestoffset_hwp);
   }
@@ -154,11 +173,16 @@ void pref_bo_train(Pref_BO* bestoffset_hwp, Addr line_addr, uns8 proc_id) {
     int * score = (int*) hash_table_access(bestoffset_hwp->score_table, bestoffset_hwp->train_offset);
     (*score)++;
     // if we reach maxscore use this as the new offset and start a new learning pphase
+    if(PREF_BO_BLOOM_FILTER)
+      pref_bo_insert_bloom(bestoffset_hwp, bestoffset_hwp->offset_idx);
     if((*score) >= (int)PREF_BO_MAX_SCORE){
       STAT_EVENT(proc_id, PREF_BO_END_ROUND_MAX_SCORE);
       bestoffset_hwp->cur_offset = bestoffset_hwp->train_offset;
       bestoffset_hwp->new_phase = TRUE;
       STAT_EVENT(proc_id, PREF_BO_OFFSET_USED_1 + bestoffset_hwp->offset_idx);
+      if(PREF_BO_BLOOM_FILTER)
+        //dereference to make sure copy happens?
+        (*bestoffset_hwp->cur_bloom) = (*bestoffset_hwp->bloom_array[bestoffset_hwp->offset_idx)]);
     }
   }
   else {
@@ -185,6 +209,9 @@ void pref_bo_train(Pref_BO* bestoffset_hwp, Addr line_addr, uns8 proc_id) {
     }
     STAT_EVENT(proc_id, PREF_BO_OFFSET_USED_1 + offset_idx);
     bestoffset_hwp->cur_offset = best_offset;
+    if(PREF_BO_BLOOM_FILTER)
+        //dereference to make sure copy happens?
+        (*bestoffset_hwp->cur_bloom) = (*bestoffset_hwp->bloom_array[offset_idx]);
     if(best_score < (int)PREF_BO_BAD_SCORE) {
       STAT_EVENT(proc_id, PREF_BO_THROTTLE_BAD_SCORE);
       bestoffset_hwp->throttle = TRUE;
@@ -201,6 +228,11 @@ void pref_bo_train(Pref_BO* bestoffset_hwp, Addr line_addr, uns8 proc_id) {
 void pref_bo_emit_prefetch(Pref_BO * bestoffset_hwp, Addr line_addr, Flag is_umlc, uns8 proc_id) {
   if(bestoffset_hwp->throttle)
     return;
+  // check if the line is in the bloom filter, if its not then don't prefetch
+  if(PREF_BO_BLOOM_FILTER){
+    if(!bestoffset_hwp.cur_bloom->bloom.contains(line_addr))
+      return;
+  }
   STAT_EVENT(proc_id, BO_PREF_EMITTED);
   if(is_umlc){
     for (int ii=0; ii<(int)PREF_BO_DEGREE; ii++){
@@ -214,6 +246,12 @@ void pref_bo_emit_prefetch(Pref_BO * bestoffset_hwp, Addr line_addr, Flag is_uml
   }
 }
 
+// this introduces the question how many entries should we have in the bloom filter to throttle
+// if we get only ~5 or so should we still throttle? or would bad_score already throttle
+// Ya bad score would already throttle this, so the implementation would be more sensetive to bad-score param
+void pref_bo_insert_bloom(Pref_BO* bestoffset_hwp, Addr line_addr, int offset_idx) {
+  bestoffset_hwp.bloom_filters[offset_idx]->bloom->insert(line_addr);
+}
 // line inserted into recent requests when prefetched line is inserted into UMLC 
 // these are sus, test these
 void pref_bo_umlc_pref_line_filled(uns proc_id, Addr line_addr) {
@@ -259,6 +297,10 @@ void pref_bo_reset_scores(Pref_BO* bestoffset_hwp) {
   for (int ii=0; ii<(int)PREF_BO_OFFSET_N; ii++) {
     score = (int*)hash_table_access_create(bestoffset_hwp->score_table, potentialBOs[ii], &new_entry);
     *score = 0;
+    // clear bloom filters for new phase
+    // need to create a when assigning current bloom filter
+    if(PREF_BO_BLOOM_FILTER)
+      bestoffset_hwp.bloom_array->bloom.clear();
   }
 }
 

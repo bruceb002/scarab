@@ -13,6 +13,8 @@ extern "C" {
 #define GET_INDEX(addr, num_entries) addr % num_entries
 #define GET_TAG(addr, num_entries, mask) (addr / num_entries) & mask
 
+typedef struct BO_Bloom_Filter_struct BO_Bloom_Filter;
+
 typedef struct BO_Table_Entry_Struct {
   Flag trained;
   Flag valid;
@@ -50,6 +52,8 @@ typedef struct BO_Struct {
   int                     cur_offset; // what round are we using currently
   int                     offset_idx;
   Flag                    throttle;
+  BO_Bloom_Filter *       bloom_array;
+  BO_Bloom_Filter *       cur_bloom;
 } Pref_BO;
 
 typedef struct {
