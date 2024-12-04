@@ -7,6 +7,7 @@ DEF_PARAM(pref_bo_max_rounds,   PREF_BO_MAX_ROUNDS,     uns,    uns,    10,)
 DEF_PARAM(pref_bo_max_score,    PREF_BO_MAX_SCORE,      uns,    uns,    10,)
 DEF_PARAM(pref_bo_bad_score,    PREF_BO_BAD_SCORE,      uns,    uns,    5,)
 DEF_PARAM(pref_bo_offset_n,     PREF_BO_OFFSET_N,       uns,    uns,    52,)
+DEF_PARAM(pref_bo_rr_tag_bits,  PREF_BO_RR_TAG_BITS,    uns,    uns,    52,)
 // number of prefetches emitted at a time
 // paper uses 1
 DEF_PARAM(pref_bo_degree,       PREF_BO_DEGREE,         uns,    uns,    1,)

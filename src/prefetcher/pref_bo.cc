@@ -270,7 +270,7 @@ void pref_bo_insert_to_rr_table(Pref_BO * bestoffset_hwp, Addr line_addr) {
   //Addr base_addr = ((line_addr) >> LOG2(DCACHE_LINE_SIZE)) - bestoffset_hwp->cur_offset;
   Addr base_addr = ((line_addr) >> LOG2(DCACHE_LINE_SIZE)) - bestoffset_hwp->cur_offset;
   Addr rr_idx = (base_addr) % PREF_BO_RR_TABLE_N;
-  Addr tag = base_addr & 0x00000000ffffffff;
+  Addr tag = base_addr & ((uns)0xffffffffffffffff >> (64 - PREF_BO_RR_TAG_BITS));
   bestoffset_hwp->rr_table[rr_idx].line_addr = tag;
   bestoffset_hwp->rr_table[rr_idx].cycle_accessed = cycle_count;
   bestoffset_hwp->rr_table[rr_idx].valid = TRUE;
@@ -282,7 +282,7 @@ Flag pref_bo_access_rr(Pref_BO * bestoffset_hwp, Addr line_addr) {
   Addr base_addr = ((line_addr) >> LOG2(DCACHE_LINE_SIZE)) - bestoffset_hwp->train_offset;
   Addr base_addr = (line_addr) >> LOG2(DCACHE_LINE_SIZE);
   Addr rr_idx = (base_addr) % PREF_BO_RR_TABLE_N;
-  Addr tag = base_addr & 0x00000000ffffffff;
+  Addr tag = base_addr & ((uns)0xffffffffffffffff >> (64 - PREF_BO_RR_TAG_BITS));
   DEBUG(0, "Lookup addr: %llu, tag: %llu\n", base_addr, tag);
   if(RR_table_debug.count(tag))
     STAT_EVENT(0, PREF_BO_RR_ADDR_SEEN);
