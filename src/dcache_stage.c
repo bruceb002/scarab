@@ -63,6 +63,8 @@
 /* Global Variables */
 
 Dcache_Stage* dc = NULL;
+Hash_Table* hash_counter = NULL;
+Cache assoc_cache;
 
 /**************************************************************************************/
 /* set_dcache_stage: */
@@ -112,6 +114,10 @@ void init_dcache_stage(uns8 proc_id, const char* name) {
                DCACHE_REPL);
 
   memset(dc->rand_wb_state, 0, NUM_ELEMENTS(dc->rand_wb_state));
+
+  // MY CODE
+  hash_counter = (Hash_Table*)malloc(sizeof(Hash_Table));
+  init_hash_table(hash_counter, "hash_counter", (uns) (DCACHE_SIZE / DCACHE_LINE_SIZE), sizeof(Addr));
 }
 
 
@@ -153,6 +159,23 @@ void debug_dcache_stage() {
                  STAGE_MAX_OP_COUNT);
 }
 
+void track_3C(Op* op, Addr line_addr, void* addr_hash_counter, Dcache_Data* assoc_line);
+void track_3C(Op* op, Addr line_addr, void* addr_hash_counter, Dcache_Data* assoc_line) {
+  Flag new_entry = TRUE;
+  addr_hash_counter = hash_table_access_create(hash_counter, line_addr, &new_entry);
+  // addr_hash = hash_table_access_create(dc->dcache.hash_table, line_addr, &new_entry);
+  if (new_entry) {
+    STAT_EVENT(op->proc_id, DCACHE_COMPULSORY);
+  } else {
+    (*((int *) addr_hash_counter))++;
+    if (assoc_line == NULL) {
+      STAT_EVENT(op->proc_id, DCACHE_CAPACITY);
+    } else {
+      STAT_EVENT(op->proc_id, DCACHE_CONFLICT);
+    }
+  }
+}
+
 /**************************************************************************************/
 /* update_dcache_stage: */
 void update_dcache_stage(Stage_Data* src_sd) {
@@ -162,6 +185,10 @@ void update_dcache_stage(Stage_Data* src_sd) {
   int          start_op_count;
   Addr         line_addr;
   uns          ii, jj;
+  // MY CODE
+  Dcache_Data* assoc_line;
+  Addr rec_addr;
+  void *addr_hash_counter;
 
   // {{{ phase 1 - move ops into the dcache stage
   ASSERT(dc->proc_id, src_sd->max_op_count == dc->sd.max_op_count);
@@ -287,6 +314,9 @@ void update_dcache_stage(Stage_Data* src_sd) {
 
     line = (Dcache_Data*)cache_access(&dc->dcache, op->oracle_info.va,
                                       &line_addr, TRUE);
+    // MY CODE
+    assoc_line = cache_access(&assoc_cache, line_addr, &rec_addr, TRUE);
+
     op->dcache_cycle = cycle_count;
     dc->idle_cycle   = MAX2(dc->idle_cycle, cycle_count + DCACHE_CYCLES);
 
@@ -447,6 +477,8 @@ void update_dcache_stage(Stage_Data* src_sd) {
             FREQ_DOMAIN_L1);
           STAT_EVENT(op->proc_id, DCACHE_MISS_WAITMEM);
         }
+        // MY CODE
+        track_3C(op, line_addr, &addr_hash_counter, assoc_line);
       } else if(op->table_info->mem_type == MEM_PF ||
                 op->table_info->mem_type == MEM_WH) {
         // prefetches don't scan the store buffer
@@ -498,6 +530,9 @@ void update_dcache_stage(Stage_Data* src_sd) {
                              op->inst_info->extra_ld_latency;
             op->state = OS_SCHEDULED;
           }
+
+          // MY CODE
+          track_3C(op, line_addr, &addr_hash_counter, assoc_line);
         } else {
           op->state = OS_WAIT_MEM;  // go into this state if no miss buffer is
                                     // available
@@ -556,6 +591,9 @@ void update_dcache_stage(Stage_Data* src_sd) {
                              op->inst_info->extra_ld_latency;
             op->state = OS_SCHEDULED;
           }
+
+          // MY CODE
+          track_3C(op, line_addr, &addr_hash_counter, assoc_line);
         } else {
           op->state                                     = OS_WAIT_MEM;
           cmp_model.node_stage[dc->proc_id].mem_blocked = TRUE;
@@ -678,6 +716,7 @@ Flag dcache_fill_line(Mem_Req* req) {
 
     data = (Dcache_Data*)cache_insert(&dc->dcache, dc->proc_id, req->addr,
                                       &line_addr, &repl_line_addr);
+    // MY CODE
     DEBUG(dc->proc_id,
           "Filling dcache  off_path:%d addr:0x%s  :%7d index:%7d op_count:%d "
           "oldest:%lld\n",
@@ -720,6 +759,7 @@ Flag dcache_fill_line(Mem_Req* req) {
 
   wp_process_dcache_fill(data, req);
 
+
   if(req->type == MRT_DPRF) {  // cmp FIXME
     data->HW_prefetch   = TRUE;
     data->HW_prefetched = TRUE;
@@ -727,6 +767,7 @@ Flag dcache_fill_line(Mem_Req* req) {
     data->HW_prefetch   = FALSE;
     data->HW_prefetched = FALSE;
   }
+
 
   for(; op_p; op_p = (Op**)list_next_element(&req->op_ptrs)) {
     ASSERT(dc->proc_id, op_unique);
